@@ -7,6 +7,7 @@ defmodule Sequin.TableReaderTest do
   alias Sequin.Factory.CharacterFactory
   alias Sequin.Factory.ConsumersFactory
   alias Sequin.Factory.DatabasesFactory
+  alias Sequin.Postgres
   alias Sequin.Runtime.KeysetCursor
   alias Sequin.Runtime.TableReader
   alias Sequin.TestSupport.Models.Character
@@ -160,6 +161,53 @@ defmodule Sequin.TableReaderTest do
   end
 
   describe "fetch_batch/4" do
+    test "preserves custom composite type values in read messages", %{db: db} do
+      suffix = Integer.to_string(Factory.unique_integer())
+      type_name = "money_with_currency_#{suffix}"
+      table_name = "payments_#{suffix}"
+
+      Repo.query!("CREATE TYPE public.#{type_name} AS (currency_code varchar, amount numeric)")
+
+      Repo.query!("""
+      CREATE TABLE public.#{table_name} (
+        id integer PRIMARY KEY,
+        amount public.#{type_name} NOT NULL
+      )
+      """)
+
+      Repo.query!("INSERT INTO public.#{table_name} (id, amount) VALUES (1, ROW('EUR', 42.00)::public.#{type_name})")
+
+      {:ok, tables} = Postgres.fetch_tables_with_columns(Repo, ["public"])
+      table = Enum.find(tables, &(&1.name == table_name))
+      id_column = Enum.find(table.columns, &(&1.name == "id"))
+      table = %{table | sort_column_attnum: id_column.attnum}
+
+      consumer =
+        Repo.preload(
+          ConsumersFactory.insert_sink_consumer!(
+            account_id: db.account_id,
+            postgres_database_id: db.id,
+            source: ConsumersFactory.source_attrs(include_table_oids: [table.oid])
+          ),
+          [:postgres_database, :filter]
+        )
+
+      backfill =
+        ConsumersFactory.insert_active_backfill!(
+          account_id: db.account_id,
+          sink_consumer_id: consumer.id,
+          initial_min_cursor: %{id_column.attnum => 0},
+          sort_column_attnum: id_column.attnum,
+          table_oid: table.oid
+        )
+
+      assert {:ok, %{messages: [message]}} =
+               TableReader.fetch_batch(db, consumer, backfill, table, %{id_column.attnum => 0}, include_min: true)
+
+      assert message.data.action == :read
+      assert message.data.record["amount"] == "(EUR,42.00)"
+    end
+
     test "fetches a batch of records with default limit", %{
       db: db,
       backfill: backfill,
