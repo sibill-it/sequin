@@ -72,6 +72,53 @@ defmodule Sequin.MessageHandlerTest do
       assert {:ok, 1} = MessageLedgers.count_undelivered_wal_cursors(consumer.id, DateTime.utc_now())
     end
 
+    test "preserves composite values in insert, update, and delete messages" do
+      account = AccountsFactory.insert_account!()
+      database = DatabasesFactory.insert_postgres_database!(account_id: account.id)
+
+      consumer =
+        ConsumersFactory.insert_sink_consumer!(
+          account_id: account.id,
+          postgres_database_id: database.id
+        )
+
+      start_supervised!(
+        {SlotMessageStoreSupervisor, [consumer_id: consumer.id, test_pid: self(), persisted_mode?: false]}
+      )
+
+      consumer = Repo.preload(consumer, [:postgres_database])
+      context = context(consumers: [consumer], postgres_database: database)
+      composite_text = "(EUR,42.00)"
+
+      for action <- [:insert, :update, :delete] do
+        field = ReplicationFactory.field(column_name: "amount", column_attnum: 2, value: composite_text)
+
+        message =
+          case action do
+            :insert ->
+              ReplicationFactory.postgres_message(action: action, table_oid: 123, fields: [field])
+
+            :update ->
+              ReplicationFactory.postgres_message(
+                action: action,
+                table_oid: 123,
+                fields: [field],
+                old_fields: [field]
+              )
+
+            :delete ->
+              ReplicationFactory.postgres_message(action: action, table_oid: 123, old_fields: [field])
+          end
+
+        assert {:ok, 1} = MessageHandler.handle_messages(context, [message])
+      end
+
+      for action <- [:insert, :update, :delete] do
+        event = Enum.find(list_messages(consumer), &(&1.data.action == action))
+        assert event.data.record["amount"] == composite_text
+      end
+    end
+
     test "handles update messages with group_id correctly" do
       account = AccountsFactory.insert_account!()
       database = DatabasesFactory.insert_postgres_database!(account_id: account.id)
