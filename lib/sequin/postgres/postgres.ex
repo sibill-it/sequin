@@ -716,7 +716,15 @@ defmodule Sequin.Postgres do
   def safe_select_columns(%PostgresDatabaseTable{} = table) do
     table.columns
     |> Enum.filter(&has_encoder?/1)
-    |> Enum.map_join(", ", &quote_name(&1.name))
+    |> Enum.map_join(", ", fn column ->
+      name = quote_name(column.name)
+
+      if column.pg_typtype == "c" do
+        "#{name}::text AS #{name}"
+      else
+        name
+      end
+    end)
   end
 
   def sequence_nextval(sequence_name) do
@@ -923,7 +931,7 @@ defmodule Sequin.Postgres do
 
             # This is the catch-all when encode is not implemented
             Jason.Encoder.impl_for(value) == Jason.Encoder.Any ->
-              Logger.debug("[Postgres] No Jason.Encoder for #{inspect(value)}", column: col.name, table: table.name)
+              Logger.warning("[Postgres] No Jason.Encoder for value", column: col.name, table: table.name)
               nil
 
             true ->
