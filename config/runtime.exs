@@ -291,6 +291,11 @@ config :sequin, Sequin.Finch,
 config :sequin, Sequin.Runtime.SinkPipeline, default_workers_per_sink: default_workers_per_sink
 
 if config_env() == :prod do
+  # A SENTRY_DSN set at runtime overrides the one baked in at build time
+  if System.get_env("SENTRY_DSN") not in [nil, ""] do
+    config :sentry, dsn: System.get_env("SENTRY_DSN")
+  end
+
   vault_key = ConfigParser.vault_key(env_vars)
 
   datadog_api_key = get_env.("DATADOG_API_KEY")
