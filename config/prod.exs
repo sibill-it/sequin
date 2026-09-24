@@ -8,8 +8,10 @@ import Config
 
 self_hosted = System.get_env("SELF_HOSTED", "0") in ~w(1 true)
 
+# An empty SENTRY_DSN (e.g. Docker build without the build arg) means "no DSN at build time".
+# It can still be provided at runtime, see config/runtime.exs.
 config :sentry,
-  dsn: System.get_env("SENTRY_DSN"),
+  dsn: if(System.get_env("SENTRY_DSN") not in [nil, ""], do: System.get_env("SENTRY_DSN")),
   release: System.get_env("RELEASE_VERSION")
 
 config :sequin, Sequin.ConsoleLogger, drop_metadata_keys: [:mfa]

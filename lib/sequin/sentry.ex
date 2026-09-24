@@ -8,9 +8,9 @@ defmodule Sequin.Sentry do
         Sentry.put_config(:dsn, nil)
 
       env == :prod ->
-        # Ensure Sentry DSN was set during compile
+        # Ensure Sentry DSN was set at build time or at runtime
         if is_nil(Application.get_env(:sentry, :dsn)) do
-          raise "SENTRY_DSN was not set at build time. This is a bug."
+          raise "SENTRY_DSN was not set at build time or at runtime. Set SENTRY_DSN or CRASH_REPORTING_DISABLED=true."
         end
 
         :logger.add_handler(:sentry_handler, Sentry.LoggerHandler, %{})
