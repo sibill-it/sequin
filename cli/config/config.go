@@ -441,8 +441,18 @@ func Plan(ctx *context.Context, yamlPath string) (*PlanResponse, error) {
 
 	// Parse response
 	var planResp PlanResponse
-	if err := json.Unmarshal(body, &planResp); err != nil {
-		fmt.Println(string(body))
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	// Resource values are untyped; float64 would round large integer filters
+	// and could hide a change from config apply.
+	decoder.UseNumber()
+	if err := decoder.Decode(&planResp); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+	// Keep json.Unmarshal's requirement that the response contain one value.
+	if err := decoder.Decode(new(json.RawMessage)); err != io.EOF {
+		if err == nil {
+			err = fmt.Errorf("unexpected trailing JSON value")
+		}
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 

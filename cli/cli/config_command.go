@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"reflect"
@@ -114,6 +115,10 @@ func (c *ConfigCommands) planAction(_ *fisk.ParseContext) error {
 		return err
 	}
 
+	return c.displayPlan(planResp)
+}
+
+func (c *ConfigCommands) displayPlan(planResp *config.PlanResponse) error {
 	// Display results
 	if len(planResp.Changes) == 0 {
 		fmt.Println("No changes detected")
@@ -208,7 +213,7 @@ func convertToMap(v interface{}) map[string]interface{} {
 // PrettyDiff generates a colored diff output between two maps
 func PrettyDiff(oldMap, newMap map[string]interface{}) string {
 	// Create diff engine
-	differ, err := diff.NewDiffer(diff.AllowTypeMismatch(true))
+	differ, err := diff.NewDiffer(diff.AllowTypeMismatch(true), diff.CustomValueDiffers(jsonNumberDiffer{}))
 	if err != nil {
 		return fmt.Sprintf("Error creating differ: %v", err)
 	}
@@ -391,6 +396,26 @@ func PrettyDiff(oldMap, newMap map[string]interface{}) string {
 	}
 
 	return builder.String()
+}
+
+// json.Number has string kind, but a JSON number and a string containing the
+// same digits are different values. Preserve that distinction in the differ.
+type jsonNumberDiffer struct{}
+
+func (jsonNumberDiffer) Match(a, b reflect.Value) bool {
+	numberType := reflect.TypeOf(json.Number(""))
+	return a.Kind() == reflect.String && b.Kind() == reflect.String &&
+		(a.Type() == numberType || b.Type() == numberType)
+}
+
+func (jsonNumberDiffer) Diff(_ diff.DiffType, _ diff.DiffFunc, changes *diff.Changelog, path []string, a, b reflect.Value, parent interface{}) error {
+	if a.Type() != b.Type() || a.String() != b.String() {
+		changes.Add(diff.UPDATE, path, a.Interface(), b.Interface(), parent)
+	}
+	return nil
+}
+
+func (jsonNumberDiffer) InsertParentDiffer(func([]string, reflect.Value, reflect.Value, interface{}) error) {
 }
 
 // formatValue converts a value to a readable string
